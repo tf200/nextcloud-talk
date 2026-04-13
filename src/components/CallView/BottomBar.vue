@@ -1,0 +1,482 @@
+<!--
+- SPDX-FileCopyrightText: 2025 Nextcloud GmbH and Nextcloud contributors
+- SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+
+<script setup lang="ts">
+import {
+	showError,
+} from '@nextcloud/dialogs'
+import { t } from '@nextcloud/l10n'
+import { useHotKey } from '@nextcloud/vue/composables/useHotKey'
+import { useIsMobile } from '@nextcloud/vue/composables/useIsMobile'
+import { useResizeObserver } from '@vueuse/core'
+import debounce from 'debounce'
+import { computed, onMounted, onUnmounted, ref, toValue, useTemplateRef, watch } from 'vue'
+import { useStore } from 'vuex'
+import NcActionButton from '@nextcloud/vue/components/NcActionButton'
+import NcActions from '@nextcloud/vue/components/NcActions'
+import NcButton from '@nextcloud/vue/components/NcButton'
+import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
+import IconFullscreen from 'vue-material-design-icons/Fullscreen.vue'
+import IconFullscreenExit from 'vue-material-design-icons/FullscreenExit.vue'
+import IconHandBackLeft from 'vue-material-design-icons/HandBackLeft.vue' // Filled for better indication
+import IconHandBackLeftOutline from 'vue-material-design-icons/HandBackLeftOutline.vue'
+import IconSubtitles from 'vue-material-design-icons/Subtitles.vue'
+import IconSubtitlesOutline from 'vue-material-design-icons/SubtitlesOutline.vue'
+import IconViewGalleryOutline from 'vue-material-design-icons/ViewGalleryOutline.vue'
+import IconViewGridOutline from 'vue-material-design-icons/ViewGridOutline.vue'
+import CallButton from '../TopBar/CallButton.vue'
+import ReactionMenu from '../TopBar/ReactionMenu.vue'
+import TopBarMediaControls from '../TopBar/TopBarMediaControls.vue'
+import {
+	toggleFullscreen,
+	useDocumentFullscreen,
+} from '../../composables/useDocumentFullscreen.ts'
+import { useGetToken } from '../../composables/useGetToken.ts'
+import { CONVERSATION, PARTICIPANT } from '../../constants.ts'
+import { getTalkConfig } from '../../services/CapabilitiesManager.ts'
+import { useActorStore } from '../../stores/actor.ts'
+import { useBreakoutRoomsStore } from '../../stores/breakoutRooms.ts'
+import { useCallViewStore } from '../../stores/callView.ts'
+import { useLiveTranscriptionStore } from '../../stores/liveTranscription.ts'
+import { localCallParticipantModel, localMediaModel } from '../../utils/webrtc/index.js'
+
+const { isSidebar = false } = defineProps<{
+	isSidebar: boolean
+}>()
+const AUTO_LOWER_HAND_THRESHOLD = 3000
+const disableKeyboardShortcuts = OCP.Accessibility.disableKeyboardShortcuts()
+
+const store = useStore()
+const token = useGetToken()
+const actorStore = useActorStore()
+const breakoutRoomsStore = useBreakoutRoomsStore()
+const isFullscreen = !isSidebar && useDocumentFullscreen()
+const callViewStore = useCallViewStore()
+const liveTranscriptionStore = useLiveTranscriptionStore()
+
+const isLiveTranscriptionLoading = ref(false)
+const bottomBar = useTemplateRef('bottomBar')
+const callButtonWithActions = useTemplateRef('callButtonWithActions')
+const isMobile = useIsMobile()
+
+const conversation = computed(() => {
+	return store.getters.conversation(token.value) || store.getters.dummyConversation
+})
+
+const supportedReactions = computed(() => getTalkConfig(token.value, 'call', 'supported-reactions') || [])
+
+const hasReactionSupport = computed(() => supportedReactions.value && supportedReactions.value.length > 0)
+
+const canModerate = computed(() => [PARTICIPANT.TYPE.OWNER, PARTICIPANT.TYPE.MODERATOR, PARTICIPANT.TYPE.GUEST_MODERATOR]
+	.includes(conversation.value.participantType))
+
+const isLiveTranscriptionSupported = computed(() => getTalkConfig(token.value, 'call', 'live-transcription') || false)
+
+const liveTranscriptionButtonLabel = computed(() => {
+	if (!callViewStore.isLiveTranscriptionEnabled) {
+		return t('spreed', 'Enable live transcription')
+	}
+
+	return t('spreed', 'Disable live transcription')
+})
+
+const isHandRaised = computed(() => localMediaModel.attributes.raisedHand.state === true)
+
+const raiseHandButtonLabel = computed(() => {
+	if (!isHandRaised.value) {
+		return disableKeyboardShortcuts
+			? t('spreed', 'Raise hand')
+			: t('spreed', 'Raise hand (R)')
+	}
+	return disableKeyboardShortcuts
+		? t('spreed', 'Lower hand')
+		: t('spreed', 'Lower hand (R)')
+})
+
+const fullscreenLabel = computed(() => {
+	return toValue(isFullscreen)
+		? t('spreed', 'Exit full screen (F)')
+		: t('spreed', 'Full screen (F)')
+})
+
+const changeViewLabel = computed(() => {
+	return isGrid.value
+		? t('spreed', 'Speaker view')
+		: t('spreed', 'Grid view')
+})
+
+const showCallLayoutSwitch = computed(() => !callViewStore.isEmptyCallView)
+const isGrid = computed(() => callViewStore.isGrid)
+const userIsInBreakoutRoomAndInCall = computed(() => conversation.value.objectType === CONVERSATION.OBJECT_TYPE.BREAKOUT_ROOM)
+
+const COLLAPSIBLE_BUTTONS = ['virtualBackground', 'liveTranscription', 'raiseHand', 'callLayout', 'fullscreen'] as const
+type CollapsibleButtons = Record<typeof COLLAPSIBLE_BUTTONS[number], boolean>
+const isActionAvailableMask = computed<CollapsibleButtons>(() => ({
+	fullscreen: !isSidebar,
+	callLayout: showCallLayoutSwitch.value,
+	raiseHand: true,
+	liveTranscription: isLiveTranscriptionSupported.value,
+	virtualBackground: !isSidebar,
+}))
+const hidingList = ref<CollapsibleButtons>({ ...isActionAvailableMask.value })
+const hasHiddenItems = computed(() => Object.values(hidingList.value).some(Boolean))
+const BUTTON_WITH_GAP_WIDTH = 38 // var(--default-clickable-area) + var--default-grid-baseline)
+const MINIMAL_MEDIA_CONTROLS_WIDTH = 236 // Minimal width to show media controls properly
+/**
+ * Adjust the layout of the bottom bar based on the available width.
+ *
+ */
+function adjustLayout() {
+	if (!bottomBar.value) {
+		return
+	}
+	// 20px is for side paddings of the bottom bar, 8px is for the gap between the call button and the options
+	const availableWidth = bottomBar.value.clientWidth - callButtonWithActions.value!.clientWidth - 28
+	if (availableWidth <= MINIMAL_MEDIA_CONTROLS_WIDTH) {
+		// Not enough space to show anything, hide all buttons
+		COLLAPSIBLE_BUTTONS.forEach((button) => {
+			hidingList.value[button as keyof typeof hidingList.value] = true
+		})
+		return
+	}
+
+	const buttonsToRender = Math.floor((availableWidth - MINIMAL_MEDIA_CONTROLS_WIDTH) / BUTTON_WITH_GAP_WIDTH)
+	// make the first n buttons visible, hide the rest
+	const buttonsToCollapse = COLLAPSIBLE_BUTTONS.filter((button) => isActionAvailableMask.value[button])
+	buttonsToCollapse.forEach((button, index) => {
+		hidingList.value[button] = index >= buttonsToRender
+	})
+}
+
+const debounceAdjustLayout = debounce(adjustLayout, 200)
+
+useResizeObserver(bottomBar, () => {
+	debounceAdjustLayout()
+})
+
+onMounted(() => {
+	adjustLayout()
+})
+
+onUnmounted(() => {
+	debounceAdjustLayout.clear?.()
+})
+
+/**
+ * Toggle live transcriptions.
+ */
+async function toggleLiveTranscription() {
+	if (isLiveTranscriptionLoading.value) {
+		return
+	}
+
+	isLiveTranscriptionLoading.value = true
+
+	if (!callViewStore.isLiveTranscriptionEnabled) {
+		await enableLiveTranscription()
+	} else {
+		await disableLiveTranscription()
+	}
+
+	isLiveTranscriptionLoading.value = false
+}
+
+/**
+ * Enable live transcriptions.
+ */
+async function enableLiveTranscription() {
+	// Strictly speaking it would be the responsibility of the components using
+	// the language metadata to ensure that it is loaded before using it, but
+	// for simplicity it is done here and enabling the live transcription is
+	// tied to having said metadata.
+	try {
+		await liveTranscriptionStore.loadLiveTranscriptionLanguages()
+	} catch (exception) {
+		showError(t('spreed', 'Error when trying to load the available live transcription languages'))
+
+		return
+	}
+
+	try {
+		await callViewStore.enableLiveTranscription(token.value)
+	} catch (error) {
+		showError(t('spreed', 'Failed to enable live transcription'))
+	}
+}
+
+/**
+ * Disable live transcriptions.
+ */
+async function disableLiveTranscription() {
+	try {
+		await callViewStore.disableLiveTranscription(token.value)
+	} catch (error) {
+		// Not being able to disable the live transcription is not really
+		// relevant for the user, as the transcript will be no longer visible in
+		// the UI anyway, so no error is shown in that case.
+	}
+}
+
+let lowerHandDelay = AUTO_LOWER_HAND_THRESHOLD
+let speakingTimestamp: number | null = null
+let lowerHandTimeout: ReturnType<typeof setTimeout> | null = null
+
+// Hand raising functionality
+/**
+ * Toggle the hand raised state for the local media model and update the store.
+ * If the user is in a breakout room, it also handles the request for assistance.
+ */
+function toggleHandRaised() {
+	const newState = !isHandRaised.value
+	localMediaModel.toggleHandRaised(newState)
+	store.dispatch('setParticipantHandRaised', {
+		sessionId: actorStore.sessionId,
+		raisedHand: localMediaModel.attributes.raisedHand,
+	})
+
+	// Handle breakout room assistance requests
+	if (userIsInBreakoutRoomAndInCall.value && !canModerate.value) {
+		const hasRaisedHands = Object.keys(store.getters.participantRaisedHandList)
+			.filter((sessionId) => sessionId !== actorStore.sessionId)
+			.length !== 0
+
+		if (hasRaisedHands) {
+			return // Assistance is already requested by someone in the room
+		}
+
+		const hasAssistanceRequested = conversation.value.breakoutRoomStatus === CONVERSATION.BREAKOUT_ROOM_STATUS.STATUS_ASSISTANCE_REQUESTED
+		if (newState && !hasAssistanceRequested) {
+			breakoutRoomsStore.requestAssistance(token.value)
+		} else if (!newState && hasAssistanceRequested) {
+			breakoutRoomsStore.dismissRequestAssistance(token.value)
+		}
+	}
+}
+
+// Auto-lower hand when speaking
+watch(() => localMediaModel.attributes.speaking, (speaking) => {
+	if (lowerHandTimeout !== null && !speaking) {
+		lowerHandDelay = Math.max(0, lowerHandDelay - (Date.now() - speakingTimestamp!))
+		clearTimeout(lowerHandTimeout)
+		lowerHandTimeout = null
+		return
+	}
+
+	// User is not speaking OR timeout is already running OR hand is not raised
+	if (!speaking || lowerHandTimeout !== null || !isHandRaised.value) {
+		return
+	}
+
+	speakingTimestamp = Date.now()
+	lowerHandTimeout = setTimeout(() => {
+		lowerHandTimeout = null
+		speakingTimestamp = null
+		lowerHandDelay = AUTO_LOWER_HAND_THRESHOLD
+
+		if (isHandRaised.value) {
+			toggleHandRaised()
+		}
+	}, lowerHandDelay)
+})
+
+/**
+ * Switches the call view mode between grid and speaker view.
+ */
+function changeView() {
+	callViewStore.setCallViewMode({ token: token.value, isGrid: !isGrid.value, clearLast: false })
+	callViewStore.setSelectedVideoPeerId(null)
+}
+
+// Keyboard shortcuts
+useHotKey('r', toggleHandRaised)
+</script>
+
+<template>
+	<div ref="bottomBar" class="bottom-bar" data-theme-dark>
+		<div v-if="!isSidebar" class="bottom-bar-call-controls">
+			<!-- Fullscreen -->
+			<NcButton
+				v-if="!hidingList.fullscreen"
+				:aria-label="fullscreenLabel"
+				:variant="isFullscreen ? 'secondary' : 'tertiary'"
+				:title="fullscreenLabel"
+				@click="toggleFullscreen">
+				<template #icon>
+					<IconFullscreen v-if="!isFullscreen" :size="20" />
+					<IconFullscreenExit v-else :size="20" />
+				</template>
+			</NcButton>
+			<!-- Call layout switcher -->
+			<NcButton
+				v-if="showCallLayoutSwitch && !hidingList.callLayout"
+				variant="tertiary"
+				:aria-label="changeViewLabel"
+				:title="changeViewLabel"
+				@click="changeView">
+				<template #icon>
+					<IconViewGridOutline v-if="!isGrid" :size="20" />
+					<IconViewGalleryOutline v-else :size="20" />
+				</template>
+			</NcButton>
+		</div>
+
+		<div class="bottom-bar-call-controls">
+			<!-- Local media controls -->
+			<TopBarMediaControls
+				:token="token"
+				:model="localMediaModel"
+				:isSidebar="isSidebar"
+				:hideVirtualBackgroundShortcut="hidingList.virtualBackground"
+				:localCallParticipantModel="localCallParticipantModel" />
+
+			<!-- Reactions menu -->
+			<ReactionMenu
+				v-if="hasReactionSupport"
+				:token="token"
+				:supportedReactions="supportedReactions"
+				:localCallParticipantModel="localCallParticipantModel" />
+
+			<NcButton
+				v-if="isLiveTranscriptionSupported && !hidingList.liveTranscription"
+				:title="liveTranscriptionButtonLabel"
+				:aria-label="liveTranscriptionButtonLabel"
+				:variant="callViewStore.isLiveTranscriptionEnabled ? 'secondary' : 'tertiary'"
+				:disabled="isLiveTranscriptionLoading"
+				@click="toggleLiveTranscription">
+				<template #icon>
+					<NcLoadingIcon
+						v-if="isLiveTranscriptionLoading"
+						:size="20" />
+					<IconSubtitles
+						v-else-if="callViewStore.isLiveTranscriptionEnabled"
+						:size="20" />
+					<IconSubtitlesOutline
+						v-else
+						:size="20" />
+				</template>
+			</NcButton>
+
+			<NcButton
+				v-if="!isSidebar && !hidingList.raiseHand"
+				:title="raiseHandButtonLabel"
+				:aria-label="raiseHandButtonLabel"
+				:variant="isHandRaised ? 'secondary' : 'tertiary'"
+				@click="toggleHandRaised">
+				<!-- The following icon is much bigger than all the others
+					so we reduce its size -->
+				<template #icon>
+					<IconHandBackLeft v-if="isHandRaised" :size="18" />
+					<IconHandBackLeftOutline v-else :size="18" />
+				</template>
+			</NcButton>
+		</div>
+		<div ref="callButtonWithActions" class="bottom-bar-options call-options">
+			<!-- Collapsed actions -->
+			<NcActions v-if="hasHiddenItems" forceMenu>
+				<!-- Fullscreen -->
+				<NcActionButton
+					v-if="!isSidebar && hidingList.fullscreen"
+					:aria-label="fullscreenLabel"
+					:variant="isFullscreen ? 'secondary' : 'tertiary'"
+					:title="fullscreenLabel"
+					@click="toggleFullscreen">
+					<template #icon>
+						<IconFullscreen v-if="!isFullscreen" :size="20" />
+						<IconFullscreenExit v-else :size="20" />
+					</template>
+					{{ fullscreenLabel }}
+				</NcActionButton>
+				<!-- Call layout switcher -->
+				<NcActionButton
+					v-if="hidingList.callLayout && showCallLayoutSwitch"
+					variant="tertiary"
+					:aria-label="changeViewLabel"
+					:title="changeViewLabel"
+					@click="changeView">
+					<template #icon>
+						<IconViewGridOutline v-if="!isGrid" :size="20" />
+						<IconViewGalleryOutline v-else :size="20" />
+					</template>
+					{{ changeViewLabel }}
+				</NcActionButton>
+				<NcActionButton
+					v-if="isLiveTranscriptionSupported && hidingList.liveTranscription"
+					:title="liveTranscriptionButtonLabel"
+					:aria-label="liveTranscriptionButtonLabel"
+					:variant="callViewStore.isLiveTranscriptionEnabled ? 'secondary' : 'tertiary'"
+					:disabled="isLiveTranscriptionLoading"
+					@click="toggleLiveTranscription">
+					<template #icon>
+						<NcLoadingIcon
+							v-if="isLiveTranscriptionLoading"
+							:size="20" />
+						<IconSubtitles
+							v-else-if="callViewStore.isLiveTranscriptionEnabled"
+							:size="20" />
+						<IconSubtitlesOutline
+							v-else
+							:size="20" />
+					</template>
+					{{ liveTranscriptionButtonLabel }}
+				</NcActionButton>
+				<NcActionButton
+					v-if="!isSidebar && hidingList.raiseHand"
+					:title="raiseHandButtonLabel"
+					:aria-label="raiseHandButtonLabel"
+					:variant="isHandRaised ? 'secondary' : 'tertiary'"
+					@click="toggleHandRaised">
+					<!-- The following icon is much bigger than all the others
+						so we reduce its size -->
+					<template #icon>
+						<IconHandBackLeft v-if="isHandRaised" :size="18" />
+						<IconHandBackLeftOutline v-else :size="18" />
+					</template>
+					{{ raiseHandButtonLabel }}
+				</NcActionButton>
+			</NcActions>
+
+			<CallButton
+				class="call-button"
+				:hideText="isSidebar || isMobile"
+				:isScreensharing="!!localMediaModel.attributes.localScreen" />
+		</div>
+	</div>
+</template>
+
+<style lang="scss" scoped>
+.bottom-bar {
+	position: absolute;
+	bottom: 0;
+	inset-inline: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: var(--wrapper-padding);
+	z-index: 10;
+	overflow: hidden;
+
+	:deep(.button-vue--tertiary) {
+		background-color: var(--color-primary-light);
+	}
+}
+
+.bottom-bar-call-controls {
+	display: flex;
+	align-items: center;
+	flex-direction: row;
+	gap: var(--default-grid-baseline);
+}
+
+.bottom-bar-call-controls:not(:has(*)) {
+	display: none
+}
+
+.call-options {
+	display: flex;
+	align-items: center;
+	flex-direction: row;
+	gap: 4px;
+}
+</style>
