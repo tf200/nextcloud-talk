@@ -68,6 +68,7 @@ use OCP\Comments\MessageTooLongException;
 use OCP\Comments\NotFoundException;
 use OCP\EventDispatcher\IEventDispatcher;
 use OCP\IL10N;
+use OCP\IDBConnection;
 use OCP\IRequest;
 use OCP\IUserManager;
 use OCP\RichObjectStrings\InvalidObjectExeption;
@@ -131,12 +132,60 @@ class ChatController extends AEnvironmentAwareOCSController {
 		protected Authenticator $federationAuthenticator,
 		protected ProxyCacheMessageService $pcmService,
 		protected Notifier $notifier,
-		protected IRichTextFormatter $richTextFormatter,
-		protected ITaskProcessingManager $taskProcessingManager,
-		protected IAppConfig $appConfig,
-		protected LoggerInterface $logger,
-	) {
+			protected IRichTextFormatter $richTextFormatter,
+			protected ITaskProcessingManager $taskProcessingManager,
+			protected IAppConfig $appConfig,
+			protected IDBConnection $dbConnection,
+			protected LoggerInterface $logger,
+		) {
 		parent::__construct($appName, $request);
+	}
+
+	private function getProjectConversationTokenForDeckCard(string $cardId): ?string {
+		if (!$this->appManager->isInstalled('projectcreatoraio')) {
+			return null;
+		}
+
+		try {
+			$query = $this->dbConnection->getQueryBuilder();
+			$result = $query->select('p.talk_conversation_token')
+				->from('custom_projects', 'p')
+				->innerJoin('p', 'deck_stacks', 's', $query->expr()->eq('p.board_id', 's.board_id'))
+				->innerJoin('s', 'deck_cards', 'c', $query->expr()->eq('s.id', 'c.stack_id'))
+				->where($query->expr()->eq('c.id', $query->createNamedParameter((int) $cardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+				->setMaxResults(1)
+				->executeQuery();
+
+			$token = $result->fetchOne();
+			if ($token === false) {
+				return null;
+			}
+
+			return trim((string) $token);
+		} catch (\Throwable $e) {
+			$this->logger->debug('Could not resolve project conversation for deck card backend restriction', [
+				'exception' => $e,
+				'cardId' => $cardId,
+			]);
+			return null;
+		}
+	}
+
+	private function validateDeckCardProjectConversation(string $objectType, string $objectId): ?DataResponse {
+		if ($objectType !== 'deck-card') {
+			return null;
+		}
+
+		$projectConversationToken = $this->getProjectConversationTokenForDeckCard($objectId);
+		if ($projectConversationToken === null) {
+			return null;
+		}
+
+		if ($projectConversationToken === '' || $projectConversationToken !== $this->room->getToken()) {
+			return new DataResponse(['error' => 'project_mismatch'], Http::STATUS_FORBIDDEN);
+		}
+
+		return null;
 	}
 
 	/**
@@ -339,6 +388,11 @@ class ChatController extends AEnvironmentAwareOCSController {
 		[$actorType, $actorId] = $this->getActorInfo($actorDisplayName);
 		if (!$actorId) {
 			return new DataResponse(['error' => 'actor'], Http::STATUS_NOT_FOUND);
+		}
+
+		$projectValidation = $this->validateDeckCardProjectConversation($objectType, $objectId);
+		if ($projectValidation !== null) {
+			return $projectValidation;
 		}
 
 		/** @var TalkRichObjectParameter $data */

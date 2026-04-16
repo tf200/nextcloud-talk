@@ -40,7 +40,11 @@ use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\Collaboration\AutoComplete\IManager;
 use OCP\Collaboration\Collaborators\ISearchResult;
 use OCP\Comments\IComment;
+use OCP\DB\QueryBuilder\IExpressionBuilder;
+use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\EventDispatcher\IEventDispatcher;
+use OCP\DB\IResult;
+use OCP\IDBConnection;
 use OCP\IL10N;
 use OCP\IRequest;
 use OCP\IUser;
@@ -90,6 +94,7 @@ class ChatControllerTest extends TestCase {
 	private IRichTextFormatter&MockObject $richTextFormatter;
 	private ITaskProcessingManager&MockObject $taskProcessingManager;
 	private IAppConfig&MockObject $appConfig;
+	private IDBConnection&MockObject $dbConnection;
 	private LoggerInterface&MockObject $logger;
 
 	protected Room&MockObject $room;
@@ -132,9 +137,10 @@ class ChatControllerTest extends TestCase {
 		$this->pcmService = $this->createMock(ProxyCacheMessageService::class);
 		$this->notifier = $this->createMock(Notifier::class);
 		$this->richTextFormatter = $this->createMock(IRichTextFormatter::class);
-		$this->taskProcessingManager = $this->createMock(ITaskProcessingManager::class);
-		$this->appConfig = $this->createMock(IAppConfig::class);
-		$this->logger = $this->createMock(LoggerInterface::class);
+			$this->taskProcessingManager = $this->createMock(ITaskProcessingManager::class);
+			$this->appConfig = $this->createMock(IAppConfig::class);
+			$this->dbConnection = $this->createMock(IDBConnection::class);
+			$this->logger = $this->createMock(LoggerInterface::class);
 
 		$this->room = $this->createMock(Room::class);
 
@@ -182,12 +188,13 @@ class ChatControllerTest extends TestCase {
 			$this->federationAuthenticator,
 			$this->pcmService,
 			$this->notifier,
-			$this->richTextFormatter,
-			$this->taskProcessingManager,
-			$this->appConfig,
-			$this->logger,
-		);
-	}
+				$this->richTextFormatter,
+				$this->taskProcessingManager,
+				$this->appConfig,
+				$this->dbConnection,
+				$this->logger,
+			);
+		}
 
 	private function newComment($id, $actorType, $actorId, $creationDateTime, $message) {
 		$comment = $this->createMock(IComment::class);
@@ -656,7 +663,7 @@ class ChatControllerTest extends TestCase {
 		$this->assertEquals($expected, $response);
 	}
 
-	public function testShareObjectToChatByUser(): void {
+		public function testShareObjectToChatByUser(): void {
 		$participant = $this->createMock(Participant::class);
 
 		$this->avatarService->method('getAvatarUrl')
@@ -747,9 +754,60 @@ class ChatControllerTest extends TestCase {
 			'referenceId' => '',
 		], Http::STATUS_CREATED);
 
-		$this->assertEquals($expected->getStatus(), $response->getStatus());
-		$this->assertEquals($expected->getData(), $response->getData());
-	}
+			$this->assertEquals($expected->getStatus(), $response->getStatus());
+			$this->assertEquals($expected->getData(), $response->getData());
+		}
+
+		public function testShareProjectDeckCardToDifferentConversationIsRejected(): void {
+			$participant = $this->createMock(Participant::class);
+			$queryBuilder = $this->createMock(IQueryBuilder::class);
+			$expressionBuilder = $this->createMock(IExpressionBuilder::class);
+			$result = $this->createMock(IResult::class);
+
+			$this->appManager->expects($this->once())
+				->method('isInstalled')
+				->with('projectcreatoraio')
+				->willReturn(true);
+			$this->dbConnection->expects($this->once())
+				->method('getQueryBuilder')
+				->willReturn($queryBuilder);
+			$this->room->expects($this->once())
+				->method('getToken')
+				->willReturn('some-other-room');
+
+			$queryBuilder->method('expr')
+				->willReturn($expressionBuilder);
+			$expressionBuilder->method('eq')
+				->willReturn('comparison');
+			$queryBuilder->method('createNamedParameter')
+				->willReturn('named-parameter');
+			$queryBuilder->method('select')
+				->willReturnSelf();
+			$queryBuilder->method('from')
+				->willReturnSelf();
+			$queryBuilder->method('innerJoin')
+				->willReturnSelf();
+			$queryBuilder->method('where')
+				->willReturnSelf();
+			$queryBuilder->method('setMaxResults')
+				->willReturnSelf();
+			$queryBuilder->expects($this->once())
+				->method('executeQuery')
+				->willReturn($result);
+			$result->expects($this->once())
+				->method('fetchOne')
+				->willReturn('project-room');
+
+			$this->chatManager->expects($this->never())
+				->method('addSystemMessage');
+
+			$this->controller->setRoom($this->room);
+			$this->controller->setParticipant($participant);
+			$response = $this->controller->shareObjectToChat('deck-card', '42');
+
+			$this->assertSame(Http::STATUS_FORBIDDEN, $response->getStatus());
+			$this->assertSame(['error' => 'project_mismatch'], $response->getData());
+		}
 
 	public function testReceiveHistoryByUser(): void {
 		$offset = 23;
