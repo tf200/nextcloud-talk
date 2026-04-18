@@ -281,6 +281,7 @@ describe('FilePreview.vue', () => {
 			beforeEach(() => {
 				oldViewer = OCA.Viewer
 				oldFiles = OCA.Files
+				vi.spyOn(window, 'open').mockImplementation(() => null)
 
 				OCA.Files = {
 					Sidebar: {
@@ -303,6 +304,8 @@ describe('FilePreview.vue', () => {
 				} else {
 					delete OCA.Files
 				}
+
+				vi.restoreAllMocks()
 			})
 
 			test('opens viewer when clicking if viewer available', async () => {
@@ -334,6 +337,30 @@ describe('FilePreview.vue', () => {
 				}))
 
 				expect(OCA.Files.Sidebar.state.file).toBe('/path/to/test.jpg')
+			})
+
+			test('opens whiteboard files in a new tab instead of viewer', async () => {
+				props.file.id = '321'
+				props.file.name = 'board.whiteboard'
+				props.file.path = 'path/to/board.whiteboard'
+				props.file.mimetype = 'application/vnd.excalidraw+json'
+
+				OCA.Viewer = {
+					open: vi.fn(),
+					availableHandlers: [{
+						mimes: ['application/vnd.excalidraw+json'],
+					}],
+					mimetypes: ['application/vnd.excalidraw+json'],
+				}
+
+				const wrapper = mountFilePreview()
+
+				await wrapper.find('img').trigger('load')
+
+				await wrapper.find('a').trigger('click')
+
+				expect(window.open).toHaveBeenCalledWith('/nc-webroot/apps/whiteboard/view/321', '_blank', 'noopener')
+				expect(OCA.Viewer.open).not.toHaveBeenCalled()
 			})
 
 			test('does not open viewer when clicking if no mime handler available', async () => {

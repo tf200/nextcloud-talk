@@ -512,6 +512,13 @@ export default {
 			event.stopPropagation()
 			event.preventDefault()
 
+			if (this.file.mimetype === 'application/vnd.excalidraw+json') {
+				window.open(generateUrl('/apps/whiteboard/view/{fileId}', {
+					fileId: this.file.id,
+				}), '_blank', 'noopener')
+				return
+			}
+
 			if (this.itemType === SHARED_ITEM.TYPES.MEDIA) {
 				const getRevertedList = (items) => Object.values(items).reverse()
 					.map((item) => item.messageParameters.file)
