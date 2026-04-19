@@ -513,9 +513,14 @@ export default {
 			event.preventDefault()
 
 			if (this.file.mimetype === 'application/vnd.excalidraw+json') {
-				window.open(generateUrl('/apps/files/f/{fileId}?openfile=true', {
-					fileId: this.file.id,
-				}), '_blank', 'noopener')
+				const fileDir = this.internalAbsolutePath.includes('/')
+					? this.internalAbsolutePath.slice(0, this.internalAbsolutePath.lastIndexOf('/')) || '/'
+					: '/'
+				window.open(
+					generateUrl(`/apps/files/?dir=${encodeURIComponent(fileDir)}&openfile=${encodeURIComponent(this.file.id)}`),
+					'_blank',
+					'noopener',
+				)
 				return
 			}
 

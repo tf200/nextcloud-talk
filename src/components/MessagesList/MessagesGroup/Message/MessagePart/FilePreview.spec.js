@@ -359,7 +359,7 @@ describe('FilePreview.vue', () => {
 
 				await wrapper.find('a').trigger('click')
 
-				expect(window.open).toHaveBeenCalledWith('/nc-webroot/apps/files/f/321?openfile=true', '_blank', 'noopener')
+				expect(window.open).toHaveBeenCalledWith('/nc-webroot/apps/files/?dir=%2Fpath%2Fto&openfile=321', '_blank', 'noopener')
 				expect(OCA.Viewer.open).not.toHaveBeenCalled()
 			})
 
