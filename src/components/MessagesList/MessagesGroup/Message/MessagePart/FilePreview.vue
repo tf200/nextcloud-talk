@@ -513,7 +513,7 @@ export default {
 			event.preventDefault()
 
 			if (this.file.mimetype === 'application/vnd.excalidraw+json') {
-				window.open(generateUrl('/apps/whiteboard/view/{fileId}', {
+				window.open(generateUrl('/apps/files/f/{fileId}?openfile=true', {
 					fileId: this.file.id,
 				}), '_blank', 'noopener')
 				return
