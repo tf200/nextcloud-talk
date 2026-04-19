@@ -517,7 +517,7 @@ export default {
 					? this.internalAbsolutePath.slice(0, this.internalAbsolutePath.lastIndexOf('/')) || '/'
 					: '/'
 				window.open(
-					generateUrl(`/apps/files/?dir=${encodeURIComponent(fileDir)}&openfile=${encodeURIComponent(this.file.id)}`),
+					generateUrl(`/apps/files/files/${encodeURIComponent(this.file.id)}?dir=${encodeURIComponent(fileDir)}&editing=false&openfile=true`),
 					'_blank',
 					'noopener',
 				)
