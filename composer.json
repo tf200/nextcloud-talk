@@ -44,7 +44,7 @@
 		"nextcloud/ocp": "dev-stable32"
 	},
 	"require": {
-		"bamarni/composer-bin-plugin": "^1.8",
+		"bamarni/composer-bin-plugin": "^1.9",
 		"cuyz/valinor": "^1.17",
 		"cweagans/composer-patches": "^1.7.3",
 		"firebase/php-jwt": "^7.0.3"
