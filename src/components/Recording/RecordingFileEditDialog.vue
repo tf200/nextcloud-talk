@@ -5,6 +5,7 @@
 
 <script setup>
 import { showError, showSuccess } from '@nextcloud/dialogs'
+import { t } from '@nextcloud/l10n'
 import { computed, onMounted, ref } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcDialog from '@nextcloud/vue/components/NcDialog'
@@ -86,7 +87,6 @@ async function shareEditedFile() {
 <template>
 	<NcDialog
 		:name="dialogTitle"
-		:open="true"
 		@update:open="emit('close')">
 		<div class="recording-file-edit-dialog">
 			<NcLoadingIcon v-if="isLoading" :size="44" />
