@@ -3,7 +3,7 @@
 set -euo pipefail
 
 REMOTE_HOST="root@185.169.252.206"
-REMOTE_APP_DIR="/var/lib/docker/volumes/nextcloud_nextcloud_custom_apps/_data/"
+REMOTE_APP_DIR="/var/lib/docker/volumes/nextcloud_nextcloud_custom_apps/_data/spreed"
 REMOTE_BRANCH="main"
 NEXTCLOUD_CONTAINER="nextcloud"
 APP_ID="spreed"
@@ -15,17 +15,11 @@ set -euo pipefail
 
 cd "${REMOTE_APP_DIR}"
 
-echo "cloning latest changes from ${REMOTE_BRANCH}"
-git clone https://github.com/tf200/nextcloud-talk.git
-
-
-cd nextcloud-talk
-
-echo "Installing dependencies from lockfile"
-make dev-setup
+echo "Pulling latest changes from ${REMOTE_BRANCH}"
+git pull origin "${REMOTE_BRANCH}"
 
 echo "Building frontend assets"
-make build-js-production
+npm run build
 
 echo "Disabling ${APP_ID}"
 docker exec -u www-data "${NEXTCLOUD_CONTAINER}" php occ app:disable "${APP_ID}"

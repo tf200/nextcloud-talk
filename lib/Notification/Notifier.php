@@ -367,7 +367,8 @@ class Notifier implements INotifier {
 					'token' => $room->getToken(),
 					'editRecordingFileId' => $file->getId(),
 					'notificationTimestamp' => $notification->getDateTime()->getTimestamp(),
-				])
+				]),
+				IAction::TYPE_WEB
 			);
 		$dismissAction = $notification->createAction()
 			->setParsedLabel($l->t('Dismiss notification'))
