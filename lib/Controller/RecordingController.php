@@ -470,4 +470,57 @@ class RecordingController extends AEnvironmentAwareOCSController {
 		}
 		return new DataResponse(null);
 	}
+
+	/**
+	 * Get the editable content of a generated transcript or summary file
+	 *
+	 * @param int $fileId ID of the file
+	 * @psalm-param non-negative-int $fileId
+	 * @return DataResponse<Http::STATUS_OK, array{fileId: int, name: string, type: string, content: string}, array{}>|DataResponse<Http::STATUS_BAD_REQUEST, array{error: string}, array{}>
+	 *
+	 * 200: Recording file content returned successfully
+	 * 400: Reading recording file content is not possible
+	 */
+	#[NoAdminRequired]
+	#[RequireModeratorParticipant]
+	public function getRecordingFileContent(int $fileId): DataResponse {
+		try {
+			return new DataResponse($this->recordingService->getRecordingFileContent(
+				$this->participant,
+				$fileId,
+			));
+		} catch (InvalidArgumentException $e) {
+			return new DataResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+		}
+	}
+
+	/**
+	 * Share an edited copy of a generated transcript or summary file to the chat
+	 *
+	 * @param int $fileId ID of the original file
+	 * @psalm-param non-negative-int $fileId
+	 * @param int $timestamp Timestamp of the notification to be dismissed
+	 * @psalm-param non-negative-int $timestamp
+	 * @param string $content Edited markdown content
+	 * @return DataResponse<Http::STATUS_OK, null, array{}>|DataResponse<Http::STATUS_BAD_REQUEST, array{error: string}, array{}>
+	 *
+	 * 200: Edited recording file shared to chat successfully
+	 * 400: Sharing edited recording file to chat is not possible
+	 */
+	#[NoAdminRequired]
+	#[RequireModeratorParticipant]
+	public function shareEditedRecordingFile(int $fileId, int $timestamp, string $content): DataResponse {
+		try {
+			$this->recordingService->shareEditedRecordingFile(
+				$this->getRoom(),
+				$this->participant,
+				$fileId,
+				$timestamp,
+				$content,
+			);
+		} catch (InvalidArgumentException $e) {
+			return new DataResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+		}
+		return new DataResponse(null);
+	}
 }

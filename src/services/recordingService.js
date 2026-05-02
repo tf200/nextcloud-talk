@@ -40,8 +40,38 @@ async function stopCallRecording(token) {
 	await axios.delete(generateOcsUrl('apps/spreed/api/v1/recording/{token}', { token }))
 }
 
+/**
+ * Get editable transcript or summary content
+ *
+ * @param {string} token conversation token
+ * @param {number} fileId file ID
+ */
+async function getRecordingFileContent(token, fileId) {
+	return axios.get(generateOcsUrl('apps/spreed/api/v1/recording/{token}/file/{fileId}/content', { token, fileId }))
+}
+
+/**
+ * Share edited transcript or summary content to the chat
+ *
+ * @param {string} token conversation token
+ * @param {number} fileId original file ID
+ * @param {number} timestamp notification timestamp
+ * @param {string} content edited markdown content
+ */
+async function shareEditedRecordingFile(token, fileId, timestamp, content) {
+	await axios.post(
+		generateOcsUrl('apps/spreed/api/v1/recording/{token}/file/{fileId}/share-edited', { token, fileId }),
+		{
+			timestamp,
+			content,
+		},
+	)
+}
+
 export {
+	getRecordingFileContent,
 	getWelcomeMessage,
+	shareEditedRecordingFile,
 	startCallRecording,
 	stopCallRecording,
 }

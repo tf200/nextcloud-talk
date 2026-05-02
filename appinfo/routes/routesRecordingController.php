@@ -33,5 +33,9 @@ return [
 		['name' => 'Recording#notificationDismiss', 'url' => '/api/{apiVersion}/recording/{token}/notification', 'verb' => 'DELETE', 'requirements' => $requirementsWithToken],
 		/** @see \OCA\Talk\Controller\RecordingController::shareToChat() */
 		['name' => 'Recording#shareToChat', 'url' => '/api/{apiVersion}/recording/{token}/share-chat', 'verb' => 'POST', 'requirements' => $requirementsWithToken],
+		/** @see \OCA\Talk\Controller\RecordingController::getRecordingFileContent() */
+		['name' => 'Recording#getRecordingFileContent', 'url' => '/api/{apiVersion}/recording/{token}/file/{fileId}/content', 'verb' => 'GET', 'requirements' => $requirementsWithToken],
+		/** @see \OCA\Talk\Controller\RecordingController::shareEditedRecordingFile() */
+		['name' => 'Recording#shareEditedRecordingFile', 'url' => '/api/{apiVersion}/recording/{token}/file/{fileId}/share-edited', 'verb' => 'POST', 'requirements' => $requirementsWithToken],
 	],
 ];

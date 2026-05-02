@@ -45,6 +45,7 @@ class RecordingService {
 	public const CONSENT_REQUIRED_NO = 0;
 	public const CONSENT_REQUIRED_YES = 1;
 	public const CONSENT_REQUIRED_OPTIONAL = 2;
+	private const EDITABLE_RECORDING_FILE_MAX_SIZE = 2097152;
 
 	public const APPCONFIG_PREFIX = 'recording/';
 
@@ -505,22 +506,70 @@ class RecordingService {
 		return ChatManager::VERB_RECORD_AUDIO;
 	}
 
-	public function shareToChat(Room $room, Participant $participant, int $fileId, int $timestamp): void {
+	/**
+	 * @return array{fileId: int, name: string, type: string, content: string}
+	 */
+	public function getRecordingFileContent(Participant $participant, int $fileId): array {
+		$file = $this->getParticipantFile($participant, $fileId);
+		$type = $this->getRecordingFileType($file);
+
+		if ($type !== 'transcript' && $type !== 'summary') {
+			throw new InvalidArgumentException('file');
+		}
+		if ($file->getSize() > self::EDITABLE_RECORDING_FILE_MAX_SIZE) {
+			throw new InvalidArgumentException('size');
+		}
+
 		try {
-			$userFolder = $this->rootFolder->getUserFolder(
-				$participant->getAttendee()->getActorId()
-			);
-			$files = $userFolder->getById($fileId);
-			/** @var \OCP\Files\File $file */
-			$file = array_shift($files);
+			$content = $file->getContent();
 		} catch (\Throwable $th) {
 			throw new InvalidArgumentException('file');
 		}
 
+		return [
+			'fileId' => $file->getId(),
+			'name' => $file->getName(),
+			'type' => $type,
+			'content' => $content,
+		];
+	}
+
+	public function shareEditedRecordingFile(Room $room, Participant $participant, int $fileId, int $timestamp, string $content): void {
+		$content = trim($content);
+		if ($content === '') {
+			throw new InvalidArgumentException('content');
+		}
+		if (strlen($content) > self::EDITABLE_RECORDING_FILE_MAX_SIZE) {
+			throw new InvalidArgumentException('size');
+		}
+
+		$sourceFile = $this->getParticipantFile($participant, $fileId);
+		$type = $this->getRecordingFileType($sourceFile);
+		if ($type !== 'transcript' && $type !== 'summary') {
+			throw new InvalidArgumentException('file');
+		}
+
+		try {
+			$folder = $sourceFile->getParent();
+			$fileName = $this->getEditedRecordingFileName($folder, $sourceFile->getName());
+			$editedFile = $folder->newFile($fileName, $content);
+		} catch (\Throwable $th) {
+			throw new InvalidArgumentException('file');
+		}
+
+		$this->shareRecordingFileToChat($room, $participant, $editedFile, $timestamp, $type);
+	}
+
+	public function shareToChat(Room $room, Participant $participant, int $fileId, int $timestamp): void {
+		$file = $this->getParticipantFile($participant, $fileId);
+		$this->shareRecordingFileToChat($room, $participant, $file, $timestamp, $this->getRecordingFileType($file));
+	}
+
+	private function shareRecordingFileToChat(Room $room, Participant $participant, File $file, int $timestamp, string $recordingFileType): void {
 		$creationDateTime = $this->timeFactory->getDateTime();
 
 		$share = $this->shareManager->newShare();
-		$share->setNodeId($fileId)
+		$share->setNodeId($file->getId())
 			->setShareTime($creationDateTime)
 			->setSharedBy($participant->getAttendee()->getActorId())
 			->setNode($file)
@@ -529,11 +578,11 @@ class RecordingService {
 			->setPermissions(\OCP\Constants::PERMISSION_READ);
 
 		$removeNotification = null;
-		if (!str_ends_with($file->getName(), '.md')) {
+		if ($recordingFileType === 'recording') {
 			$removeNotification = 'record_file_stored';
-		} elseif (!str_ends_with($file->getName(), ' - summary.md')) {
+		} elseif ($recordingFileType === 'transcript') {
 			$removeNotification = 'transcript_file_stored';
-		} elseif (str_ends_with($file->getName(), ' - summary.md')) {
+		} elseif ($recordingFileType === 'summary') {
 			$removeNotification = 'summary_file_stored';
 		}
 
@@ -565,5 +614,49 @@ class RecordingService {
 			throw new InvalidArgumentException('system');
 		}
 		$this->notificationDismiss($room, $participant, $timestamp, $removeNotification);
+	}
+
+	private function getParticipantFile(Participant $participant, int $fileId): File {
+		try {
+			$userFolder = $this->rootFolder->getUserFolder(
+				$participant->getAttendee()->getActorId()
+			);
+			$files = $userFolder->getById($fileId);
+			$file = array_shift($files);
+			if (!$file instanceof File) {
+				throw new InvalidArgumentException('file');
+			}
+			return $file;
+		} catch (\Throwable $th) {
+			throw new InvalidArgumentException('file');
+		}
+	}
+
+	/**
+	 * @return 'recording'|'transcript'|'summary'|'other'
+	 */
+	private function getRecordingFileType(File $file): string {
+		$name = $file->getName();
+		if (!str_ends_with($name, '.md')) {
+			return 'recording';
+		}
+		if (str_ends_with($name, ' - summary.md') || str_ends_with($name, ' - summary - edited.md')) {
+			return 'summary';
+		}
+		return 'transcript';
+	}
+
+	private function getEditedRecordingFileName(Folder $folder, string $sourceName): string {
+		$baseName = str_ends_with($sourceName, '.md') ? substr($sourceName, 0, -3) : $sourceName;
+		$baseName = preg_replace('/ - edited(?: \(\d+\))?$/', '', $baseName) ?? $baseName;
+		$fileName = $baseName . ' - edited.md';
+		$counter = 2;
+
+		while ($folder->nodeExists($fileName)) {
+			$fileName = $baseName . ' - edited (' . $counter . ').md';
+			$counter++;
+		}
+
+		return $fileName;
 	}
 }

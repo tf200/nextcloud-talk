@@ -360,6 +360,15 @@ class Notifier implements INotifier {
 				),
 				IAction::TYPE_POST
 			);
+		$editAction = $notification->createAction()
+			->setParsedLabel($l->t('Edit and share'))
+			->setLink(
+				$this->url->linkToRouteAbsolute('spreed.Page.showCall', [
+					'token' => $room->getToken(),
+					'editRecordingFileId' => $file->getId(),
+					'notificationTimestamp' => $notification->getDateTime()->getTimestamp(),
+				])
+			);
 		$dismissAction = $notification->createAction()
 			->setParsedLabel($l->t('Dismiss notification'))
 			->setLink(
@@ -414,6 +423,9 @@ class Notifier implements INotifier {
 
 		if ($notification->getSubject() !== 'transcript_failed' && $notification->getSubject() !== 'summary_failed') {
 			$notification->addParsedAction($shareAction);
+			if ($notification->getSubject() === 'transcript_file_stored' || $notification->getSubject() === 'summary_file_stored') {
+				$notification->addParsedAction($editAction);
+			}
 			$notification->addParsedAction($dismissAction);
 		}
 
