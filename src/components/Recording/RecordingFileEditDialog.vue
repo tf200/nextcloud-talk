@@ -87,6 +87,7 @@ async function shareEditedFile() {
 <template>
 	<NcDialog
 		:name="dialogTitle"
+		size="large"
 		@update:open="emit('close')">
 		<div class="recording-file-edit-dialog">
 			<NcLoadingIcon v-if="isLoading" :size="44" />
@@ -118,8 +119,8 @@ async function shareEditedFile() {
 
 <style lang="scss" scoped>
 .recording-file-edit-dialog {
-	min-width: min(760px, 80vw);
-	min-height: 420px;
+	width: min(1100px, 90vw);
+	min-height: min(720px, 80vh);
 	display: flex;
 	flex-direction: column;
 	justify-content: center;
@@ -131,11 +132,11 @@ async function shareEditedFile() {
 }
 
 .recording-file-edit-dialog__editor {
-	min-height: 360px;
+	min-height: min(600px, 65vh);
 }
 
 :deep(textarea) {
-	min-height: 360px;
+	min-height: min(600px, 65vh);
 	font-family: var(--font-face-monospace);
 }
 </style>
